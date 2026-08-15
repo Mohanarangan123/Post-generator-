@@ -365,6 +365,10 @@ def test_visual_spec_allows_structured_diagram_nodes():
 
 
 def test_build_image_prompt_omits_text_from_generated_image():
+    """
+    UPDATED: The new prompt now INCLUDES text instructions since we're generating
+    a complete infographic, not just a decorative background.
+    """
     spec = VisualSpec(
         day_number=1,
         title="Install Python Development Environment",
@@ -381,11 +385,14 @@ def test_build_image_prompt_omits_text_from_generated_image():
         aspect_ratio="16:9",
     )
     prompt = build_image_prompt(spec)
-    assert "Topic: Install Python Development Environment" in prompt
-    assert "Visual concept:" in prompt
-    assert "Do NOT render any text" in prompt
+    # New behavior: The prompt should INCLUDE text rendering instructions
+    assert "Title: Install Python Development Environment" in prompt
+    assert "Visual Concept:" in prompt
     assert "Install Python" in prompt
-    assert "Set PATH" not in prompt or "PATH" in prompt
+    # The new prompt should NOT say "Do NOT render any text"
+    assert "DO NOT render any text" not in prompt
+    # Instead, it should instruct the model to CREATE the complete infographic
+    assert "complete finished educational infographic" in prompt.lower() or "COMPLETE FINISHED INFOGRAPHIC" in prompt
 
 
 def test_visual_spec_accepts_semantic_fields_and_avoids_raw_node_ids():
@@ -438,7 +445,8 @@ def test_build_html_uses_semantic_layout_without_broken_image_markers():
 
 
 def test_huggingface_provider_requires_configuration():
-    provider = HuggingFaceImageProvider(token="", model_id="black-forest-labs/FLUX.1-dev")
+    """Test that HuggingFaceImageProvider raises error when token is empty."""
+    provider = HuggingFaceImageProvider(token="", model_id="Qwen/Qwen-Image-2512", provider="fal-ai")
     with pytest.raises(ImageProviderError):
         asyncio.run(provider.generate("test prompt"))
 
@@ -509,10 +517,12 @@ def test_pipeline_falls_back_to_mock_when_cloud_provider_fails(db_session):
 
 def test_generate_image_api_happy_path(client, db_session, tmp_path):
     """
-    Mock visual_spec_service._call_ollama to return valid VisualSpec JSON string;
-    mock image_renderer.render_html_to_png to write a stub PNG and return the path;
-    call POST /api/images/generate/{post_id} via TestClient;
-    assert HTTP 200, success=True, status="COMPLETED", file_path not null.
+    Mock visual_spec_service to return valid VisualSpec;
+    Mock image provider to return valid PNG bytes;
+    Call POST /api/images/generate/{post_id} via TestClient;
+    Assert HTTP 200, success=True, status="COMPLETED", file_path not null.
+    
+    UPDATED: No longer uses HTML rendering - direct image generation.
     **Validates: Requirements 8.1, 8.3**
     """
     post = make_post(db_session)
@@ -529,17 +539,15 @@ def test_generate_image_api_happy_path(client, db_session, tmp_path):
         "aspect_ratio": "1:1",
     }
 
-    # Mock Ollama call
-    with patch("app.services.visual_spec_service.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value = build_mock_client(
-            mock_ollama_visual_spec_response(valid_visual_spec)
-        )
+    # Mock VisualSpec generation
+    with patch("app.services.image_service.generate_visual_spec") as mock_gen_spec:
+        mock_gen_spec.return_value = VisualSpec(**valid_visual_spec)
 
-        # Mock Playwright render
-        with patch("app.services.image_renderer.render_html_to_png") as mock_render:
-            fake_output = tmp_path / "fake.png"
-            fake_output.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
-            mock_render.return_value = fake_output
+        # Mock image provider to return valid PNG
+        with patch("app.services.image_service.get_image_provider") as mock_get_provider:
+            mock_provider = AsyncMock()
+            mock_provider.generate.return_value = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+            mock_get_provider.return_value = mock_provider
 
             # Mock get_settings to use tmp_path as output dir
             with patch("app.services.image_service.get_settings") as mock_settings:

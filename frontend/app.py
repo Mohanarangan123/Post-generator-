@@ -552,24 +552,33 @@ def render_content_calendar() -> None:
         # ── View Infographic ──
         if has_post and view_img_clicked:
             img_data = st.session_state.get(f"img_{post['id']}")
-            if img_data and img_data.get("status") == "COMPLETED" and img_data.get("file_path"):
-                import os
-                if os.path.exists(img_data["file_path"]):
-                    with st.expander(
-                        f"🖼️ Infographic for Day {topic['day_number']}: {topic['title']}",
-                        expanded=True,
-                    ):
-                        st.markdown("**Post Content:**")
-                        st.text(post.get("content") or "*(no content)*")
-                        
-                        st.markdown("**Visual Specification:**")
-                        with st.expander("VisualSpec"):
-                            st.json(img_data["visual_spec"])
-                        
-                        st.markdown("**Generated Infographic:**")
-                        st.image(img_data["file_path"], use_container_width=True)
+            if img_data and img_data.get("status") == "COMPLETED":
+                image_id = img_data.get("id")
+                if image_id:
+                    # Use backend API to serve the image
+                    image_url = f"{BACKEND_URL}/api/images/file/{image_id}"
+                    
+                    st.markdown(f"### 🖼️ Infographic for Day {topic['day_number']}: {topic['title']}")
+                    
+                    # Post Content
+                    st.markdown("**Post Content:**")
+                    st.text(post.get("content") or "*(no content)*")
+                    
+                    # Visual Specification (collapsible but not nested)
+                    st.markdown("**Visual Specification:**")
+                    with st.expander("Show VisualSpec Details", expanded=False):
+                        st.json(img_data["visual_spec"])
+                    
+                    # Generated Infographic
+                    st.markdown("**Generated Infographic:**")
+                    try:
+                        st.image(image_url, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error displaying image: {e}")
+                        st.info("Click 'Generate Visual' to create a new one.")
                 else:
-                    st.info("Infographic file not found on disk. Click 'Generate Visual' to create a new one.")
+                    st.warning("Image ID not found in response.")
+                    st.info("Click 'Generate Visual' to create a new one.")
             else:
                 st.info("No completed infographic yet. Click 'Generate Visual' to create one.")
 

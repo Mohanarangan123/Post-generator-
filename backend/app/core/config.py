@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     # --- Image generation ---
     image_provider: str = "mock"  # "mock" or "huggingface"
     hf_token: str = ""  # Hugging Face API token
-    hf_image_model: str = "black-forest-labs/FLUX.1-dev"  # preferred HF model
+    hf_image_model: str = "Qwen/Qwen-Image-2512"  # preferred HF model for complete infographic generation
+    hf_inference_provider: str = "fal-ai"  # HF inference provider (e.g., "fal-ai")
     image_output_dir: str = "images"  # output directory for PNGs
 
     model_config = SettingsConfigDict(

@@ -1,7 +1,7 @@
 """
 Pipeline orchestrator for infographic generation.
 
-Coordinates: VisualSpec generation → ImageProvider → HTML template → Playwright render → DB persistence.
+Coordinates: VisualSpec generation → ImageProvider → Direct PNG save → DB persistence.
 Never re-raises exceptions — returns ImageModel with status=FAILED on any error.
 """
 import logging
@@ -19,11 +19,9 @@ from app.services.image_providers import (
     MockImageProvider,
     build_image_prompt,
     get_image_provider,
-    load_image,
+    is_valid_image_bytes,
 )
 from app.services.image_repository import ImageRepository
-from app.services.image_renderer import render_html_to_png
-from app.services.image_template import ASPECT_RATIO_DIMS, build_html
 from app.services.visual_spec_service import generate_visual_spec
 
 logger = logging.getLogger(__name__)
@@ -32,6 +30,15 @@ logger = logging.getLogger(__name__)
 async def run_pipeline(post_id: UUID, db: Session) -> ImageModel:
     """
     Run the full infographic generation pipeline for a post.
+    
+    NEW ARCHITECTURE (Phase 4 Fix):
+    1. Generate VisualSpec via Ollama/Qwen3
+    2. Build complete infographic prompt from VisualSpec
+    3. Generate COMPLETE INFOGRAPHIC directly via image provider (Qwen-Image-2512 or mock)
+    4. Save the generated PNG directly to disk
+    5. Update database with metadata
+    
+    NO HTML TEMPLATE RENDERING - the image provider generates the complete infographic.
 
     Always returns an ImageModel (status=COMPLETED or status=FAILED).
     Never re-raises exceptions.
@@ -73,34 +80,47 @@ async def run_pipeline(post_id: UUID, db: Session) -> ImageModel:
             provider = MockImageProvider()
         logger.info("Using provider: %s", type(provider).__name__)
 
-        # Step 4: Generate illustration asset (not the full infographic)
-        logger.info("Step 4: Generating illustration asset")
+        # Step 4: Build complete infographic prompt
+        logger.info("Step 4: Building complete infographic prompt")
         image_prompt = build_image_prompt(visual_spec)
+        logger.info("Prompt built: %d chars", len(image_prompt))
+
+        # Step 5: Generate COMPLETE INFOGRAPHIC directly from provider
+        logger.info("Step 5: Generating complete infographic from provider")
         try:
-            bg_bytes = await load_image(provider, image_prompt, visual_spec)
-        except Exception:
-            logger.warning("Provider image validation failed; using deterministic SVG fallback.")
+            image_bytes = await provider.generate(image_prompt)
+            
+            # Validate the generated image
+            if not image_bytes or not is_valid_image_bytes(image_bytes):
+                raise ImageProviderError("Provider returned invalid or empty image data")
+            
+            logger.info("Complete infographic generated: %d bytes", len(image_bytes))
+        except Exception as exc:
+            logger.warning("Provider failed; using deterministic fallback: %s", exc)
             provider = MockImageProvider()
-            bg_bytes = await load_image(provider, image_prompt, visual_spec)
-        logger.info("Illustration asset generated: %d bytes", len(bg_bytes))
+            image_bytes = await provider.generate(image_prompt)
+            logger.info("Fallback infographic generated: %d bytes", len(image_bytes))
 
-        # Step 5: Build HTML
-        logger.info("Step 5: Building HTML template")
-        html = build_html(visual_spec, bg_bytes)
-        logger.info("HTML built: %d chars", len(html))
+        # Step 6: Determine output dimensions from aspect ratio
+        aspect_ratio_dims = {
+            "1:1": (1600, 1600),
+            "4:5": (1600, 2000),
+            "16:9": (1600, 900),
+        }
+        w, h = aspect_ratio_dims.get(visual_spec.aspect_ratio, (1600, 900))
 
-        # Step 6: Render PNG
-        logger.info("Step 6: Rendering HTML to PNG")
-        w, h = ASPECT_RATIO_DIMS[visual_spec.aspect_ratio]
+        # Step 7: Save PNG directly to disk
+        logger.info("Step 6: Saving PNG to disk")
         output_dir = Path(settings.image_output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         ts = int(datetime.now(timezone.utc).timestamp())
         output_path = output_dir / f"{post_id}_{ts}.png"
-        logger.info("Rendering to %s (%dx%d)", output_path, w, h)
-        await render_html_to_png(html, output_path, w, h)
-        logger.info("PNG rendered successfully")
+        
+        # Write the image bytes directly to file
+        output_path.write_bytes(image_bytes)
+        logger.info("PNG saved successfully: %s", output_path)
 
-        # Step 7: Mark COMPLETED with all metadata
+        # Step 8: Mark COMPLETED with all metadata
         image = repo.update_status(
             image.id,
             ImageStatus.COMPLETED,
@@ -118,7 +138,7 @@ async def run_pipeline(post_id: UUID, db: Session) -> ImageModel:
 
     except Exception as exc:
         logger.error("Pipeline failed for post %s: %s", post_id, exc)
-        logger.error("Full traceback:", exc_info=True)  # Add full stack trace
+        logger.error("Full traceback:", exc_info=True)
         try:
             repo.update_status(image.id, ImageStatus.FAILED)
             db.refresh(image)

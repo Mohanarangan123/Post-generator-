@@ -82,33 +82,92 @@ async def load_image(provider: ImageProvider, prompt: str, spec: VisualSpec | No
 
 
 def build_image_prompt(spec: VisualSpec) -> str:
-    """Create a dedicated illustration-generation prompt from the infographic specification."""
-    node_summary = ", ".join(
-        f"{node.step}. {node.title}"
-        for node in spec.diagram_nodes
-    )
-    return (
-        "Create a clean professional editorial illustration for an educational LinkedIn infographic.\n\n"
-        f"Topic: {spec.title}\n\n"
-        f"Visual concept:\n{spec.visual_concept}\n\n"
-        "Create a modern technology education illustration showing the main concept visually.\n\n"
-        "Style:\n"
-        "- professional LinkedIn educational infographic\n"
-        "- clean modern vector/editorial illustration\n"
-        "- polished corporate technology aesthetic\n"
-        "- clear visual hierarchy\n"
-        "- blue, white and subtle accent colors\n"
-        "- friendly but professional\n"
-        "- realistic proportions\n"
-        "- simple uncluttered composition\n"
-        "- suitable for a technical audience\n"
-        "- high visual clarity\n\n"
-        "Show:\n"
-        f"{node_summary}\n\n"
-        "Do NOT render any text, captions, labels, numbers, logos, paragraphs, UI text or typography inside the image.\n"
-        "The application will add all text separately.\n\n"
-        "16:9 or suitable wide infographic composition."
-    )
+    """
+    Create a complete infographic generation prompt from the VisualSpec.
+    
+    This prompt instructs the model to generate a FINISHED INFOGRAPHIC, not just
+    a decorative background or illustration asset.
+    """
+    # Build node descriptions
+    node_descriptions = []
+    for node in spec.diagram_nodes:
+        node_descriptions.append(f"  Scene {node.step}: {node.title}")
+        if node.description:
+            node_descriptions.append(f"    {node.description}")
+    nodes_text = "\n".join(node_descriptions)
+    
+    # Build key points
+    key_points_text = "\n".join(f"  • {point}" for point in spec.key_points)
+    
+    return f"""Create a complete finished educational infographic for professional social media.
+
+INFOGRAPHIC CONTENT:
+
+Title: {spec.title}
+Subtitle: {spec.subtitle}
+Day Number: {spec.day_number}
+Category: {spec.diagram_type.upper()}
+
+Visual Concept:
+{spec.visual_concept}
+
+Content Structure (3-5 connected visual sections):
+{nodes_text}
+
+Key Takeaways:
+{key_points_text}
+
+CRITICAL REQUIREMENTS:
+
+DO:
+✓ Create a COMPLETE FINISHED INFOGRAPHIC as a single cohesive composition
+✓ Generate the ENTIRE image including all text, headings, labels, and typography
+✓ Use illustrated human characters interacting with the subject
+✓ Include objects: documents, computers, books, diagrams, icons
+✓ Show arrows and visual connectors demonstrating flow and progression
+✓ Organize information into 3-5 visually connected scenes/sections
+✓ Include concise readable headings and explanatory labels
+✓ Display the day number (Day {spec.day_number:02d}) prominently
+✓ Show the title "{spec.title}" as the main heading
+✓ Add short text labels where appropriate to explain concepts
+✓ Create a clear visual hierarchy with proper typography
+✓ Use a professional editorial illustration style
+✓ Apply a clean light background
+✓ Use blue/cyan dominant color palette with white accents
+✓ Make it visually rich and informative
+✓ Ensure it looks like a professionally designed educational infographic
+
+DO NOT:
+✗ Create empty rectangular boxes or placeholder panels
+✗ Generate UI cards, dashboard layouts, or presentation slides
+✗ Make generic decorative backgrounds
+✗ Create fake browser windows or application interfaces
+✗ Produce template-like structures
+✗ Leave blank spaces that need to be filled later
+✗ Create photorealistic people (use illustrated characters)
+✗ Add random decorative elements unrelated to the content
+
+VISUAL STYLE:
+- Professional editorial/explainer infographic style
+- Multiple illustrated scenes arranged cohesively
+- Educational technology publication aesthetic
+- Clear hierarchy and visual flow
+- Human characters when relevant to the topic
+- Objects and diagrams supporting the narrative
+- Arrows showing concept progression
+- Short readable text integrated naturally
+- Light background with blue/cyan dominance
+- Clean professional composition
+- Looks like it belongs in a tech blog or professional learning platform
+
+OUTPUT FORMAT:
+- Complete infographic ready for social media
+- {spec.aspect_ratio} aspect ratio
+- All text, graphics, and elements included
+- No post-processing needed
+- Professional publication quality
+
+The result should be a complete, polished educational infographic that communicates the entire concept visually and textually, similar to what you'd find in a professional technology publication or LinkedIn educational post."""
 
 
 class MockImageProvider(ImageProvider):
@@ -150,11 +209,12 @@ class LocalSVGIllustrationProvider(ImageProvider):
 
 
 class HuggingFaceImageProvider(ImageProvider):
-    """Calls the Hugging Face Inference API to generate a technical illustration."""
+    """Calls the Hugging Face Inference API to generate a complete infographic."""
 
-    def __init__(self, token: str, model_id: str) -> None:
+    def __init__(self, token: str, model_id: str, provider: str = "") -> None:
         self._token = token
         self._model_id = model_id
+        self._provider = provider
 
     async def generate(self, prompt: str) -> bytes:
         if not self._token:
@@ -165,8 +225,18 @@ class HuggingFaceImageProvider(ImageProvider):
             raise ImageProviderError(
                 "HF_IMAGE_MODEL must be configured to use HuggingFaceImageProvider."
             )
-        url = f"https://api-inference.huggingface.co/models/{self._model_id}"
-        headers = {"Authorization": f"Bearer {self._token}"}
+        
+        # Build URL based on provider
+        if self._provider:
+            url = f"https://api-inference.huggingface.co/models/{self._model_id}"
+            headers = {
+                "Authorization": f"Bearer {self._token}",
+                "x-use-inference-provider": self._provider,
+            }
+        else:
+            url = f"https://api-inference.huggingface.co/models/{self._model_id}"
+            headers = {"Authorization": f"Bearer {self._token}"}
+        
         try:
             async with httpx.AsyncClient(timeout=HF_TIMEOUT_SECONDS) as client:
                 response = await client.post(url, json={"inputs": prompt}, headers=headers)
@@ -198,8 +268,9 @@ def get_image_provider(settings) -> ImageProvider:
             raise ImageProviderError(
                 "HF_TOKEN must be configured when IMAGE_PROVIDER=huggingface."
             )
-        model_id = getattr(settings, "hf_image_model", "") or "black-forest-labs/FLUX.1-dev"
-        return HuggingFaceImageProvider(settings.hf_token, model_id)
+        model_id = getattr(settings, "hf_image_model", "") or "Qwen/Qwen-Image-2512"
+        provider = getattr(settings, "hf_inference_provider", "")
+        return HuggingFaceImageProvider(settings.hf_token, model_id, provider)
     if str(settings.image_provider).lower() in {"svg", "local_svg", "local"}:
         return LocalSVGIllustrationProvider()
     return MockImageProvider()

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # LinkedIn AI Content Generator (Phase 1: Foundation)
 
 A local, privacy-friendly AI-powered system for generating structured LinkedIn
@@ -215,3 +216,6 @@ Stop FastAPI and Streamlit with `Ctrl+C` in their respective terminals.
   here.
 - Image generation will use CPU-friendly approaches (HTML/CSS → PNG), not
   GPU-dependent diffusion models.
+=======
+# Post-generator-
+>>>>>>> 5ae00ae21b439cb23ea03bfcd1ff3bf7fa84b152

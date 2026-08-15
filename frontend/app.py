@@ -508,9 +508,10 @@ def render_content_calendar() -> None:
                             if resp_data.get("success"):
                                 st.success("Infographic generated successfully!")
                             else:
-                                st.error("Infographic generation failed.")
+                                error_detail = resp_data.get("status", "Unknown error")
+                                st.error(f"Infographic generation failed: {error_detail}")
                         else:
-                            st.error(f"Error: {err}")
+                            st.error(f"Visual generation failed: {err}")
 
                 with v2:
                     if st.button("🔄🎨", key=f"img_regen_{topic_id}", help="Regenerate Visual"):
@@ -525,9 +526,10 @@ def render_content_calendar() -> None:
                             if resp_data.get("success"):
                                 st.success("Infographic regenerated successfully!")
                             else:
-                                st.error("Infographic regeneration failed.")
+                                error_detail = resp_data.get("status", "Unknown error")
+                                st.error(f"Infographic regeneration failed: {error_detail}")
                         else:
-                            st.error(f"Error: {err}")
+                            st.error(f"Visual regeneration failed: {err}")
 
                 with v3:
                     view_img_clicked = st.button(

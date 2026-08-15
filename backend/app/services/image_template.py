@@ -103,10 +103,15 @@ def build_html(visual_spec: VisualSpec, bg_bytes: bytes) -> str:
     Returns:
         Complete <!DOCTYPE html> string ready for Playwright rendering.
     """
+    import html as html_lib  # For HTML escaping
+    
     w, h = ASPECT_RATIO_DIMS[visual_spec.aspect_ratio]
     bg_b64 = base64.b64encode(bg_bytes).decode() if bg_bytes else ""
+    
+    # HTML-escape all text content to prevent injection and handle special chars
+    title_escaped = html_lib.escape(visual_spec.title)
     key_points_li = "\n".join(
-        f"    <li>{point}</li>" for point in visual_spec.key_points
+        f"    <li>{html_lib.escape(point)}</li>" for point in visual_spec.key_points
     )
     style_css = _get_style_css(visual_spec.style, w, h)
 
@@ -119,7 +124,7 @@ def build_html(visual_spec: VisualSpec, bg_bytes: bytes) -> str:
 <body>
   <div class="container">
     <div class="day-header">DAY {visual_spec.day_number:02d}</div>
-    <h1 class="title">{visual_spec.title}</h1>
+    <h1 class="title">{title_escaped}</h1>
     <div class="visual-area">
       <img src="data:image/png;base64,{bg_b64}" alt="visual background" />
     </div>

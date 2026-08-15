@@ -1,12 +1,14 @@
-# LinkedIn AI Content Generator (Phase 1: Foundation)
+# LinkedIn AI Content Generator (Phase 1-4: Complete)
 
 A local, privacy-friendly AI-powered system for generating structured LinkedIn
-educational content series. This repository currently implements **Phase 1
-only**: the foundational project skeleton, health checks, and connectivity
-verification for the database and local LLM. Content generation, scheduling,
-and image generation are **not yet implemented**.
+educational content series with **AI-generated infographics**. This repository implements:
 
-## Tech Stack (Phase 1)
+- **Phase 1**: Foundation (health checks, database, Ollama connectivity)
+- **Phase 2**: Multi-day content planning
+- **Phase 3**: LinkedIn post generation
+- **Phase 4**: Infographic generation ✅ **WORKING**
+
+## Tech Stack
 
 | Layer          | Technology            |
 |----------------|------------------------|
@@ -14,7 +16,8 @@ and image generation are **not yet implemented**.
 | Backend        | FastAPI + Uvicorn      |
 | Database       | PostgreSQL (Docker)    |
 | ORM            | SQLAlchemy 2.x + Alembic |
-| Local LLM      | Ollama + Qwen3 4B      |
+| Local LLM      | Ollama + Qwen2.5 3B    |
+| Image Generation | Playwright + Chromium |
 
 > Hardware target: Windows 11, Intel Core Ultra 5 225H, 16 GB RAM, Intel
 > integrated graphics (no dedicated GPU). All local AI usage is CPU/RAM
@@ -104,10 +107,10 @@ To confirm it's running:
 curl http://localhost:11434
 ```
 
-### 6. Pull the Qwen3 4B model
+### 6. Pull the Qwen2.5 3B model (recommended for 16 GB RAM)
 
 ```bat
-ollama pull qwen3:4b
+ollama pull qwen2.5:3b
 ```
 
 Verify it was pulled:
@@ -116,7 +119,17 @@ Verify it was pulled:
 ollama list
 ```
 
-### 7. Start the FastAPI backend
+**Note:** The .env file is configured to use `qwen2.5:3b` which is faster and more reliable on 16 GB RAM systems than `qwen3:4b`.
+
+### 7. Install Playwright browsers (required for infographic generation)
+
+```bat
+playwright install chromium
+```
+
+This downloads the Chromium browser used for rendering infographics.
+
+### 8. Start the FastAPI backend
 
 From the project root (with the venv activated):
 
@@ -128,7 +141,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 Leave this terminal running.
 
 
-### 8. Start the Streamlit frontend
+### 9. Start the Streamlit frontend
 
 Open a **new** terminal, activate the venv again, and run:
 
@@ -139,7 +152,7 @@ streamlit run frontend/app.py
 
 Streamlit will open in your browser (default: http://localhost:8501).
 
-### 9. Test the health endpoint
+### 10. Test the health endpoint
 
 In a new terminal:
 
@@ -170,8 +183,22 @@ cd backend
 pytest
 ```
 
-These tests only check the `/health` endpoint and do not require Docker or
-Ollama to be running.
+Expected result: **74 tests passed** (includes Phase 1-4 tests)
+
+## Verifying Setup
+
+Before starting the application, verify all dependencies are correctly installed:
+
+```bat
+python scripts\verify_setup.py
+```
+
+This checks:
+- Python dependencies (FastAPI, Streamlit, Pillow, playwright, etc.)
+- Playwright browsers (Chromium)
+- Environment configuration (.env file)
+- Output directory for images
+- Ollama service connectivity
 
 ## Stopping Services
 
@@ -181,32 +208,87 @@ docker-compose down
 
 Stop FastAPI and Streamlit with `Ctrl+C` in their respective terminals.
 
-## API Endpoints (Phase 1)
+## API Endpoints (Phase 1-4)
 
 | Method | Path      | Description                                    |
 |--------|-----------|-------------------------------------------------|
 | GET    | `/health` | Basic liveness check → `{"status": "ok"}`        |
 | GET    | `/status` | Aggregated DB + Ollama connectivity status        |
+| POST   | `/api/content-plans/generate` | Generate a multi-day content plan |
+| GET    | `/api/content-plans/` | List all content plans |
+| GET    | `/api/content-plans/{id}` | Get a specific plan |
+| DELETE | `/api/content-plans/{id}` | Delete a content plan |
+| POST   | `/api/posts/generate/{day_topic_id}` | Generate a LinkedIn post |
+| POST   | `/api/posts/{id}/regenerate` | Regenerate an existing post |
+| POST   | `/api/posts/{id}/approve` | Approve a post |
+| PUT    | `/api/posts/{id}` | Update post content |
+| POST   | `/api/images/generate/{post_id}` | Generate infographic for a post |
 
 ## Environment Variables
 
 | Variable            | Default                                                        | Description                          |
 |---------------------|-----------------------------------------------------------------|---------------------------------------|
 | `DATABASE_URL`       | `postgresql+psycopg://postgres:postgres@localhost:5432/linkedin_ai` | SQLAlchemy database connection string |
-
 | `OLLAMA_BASE_URL`    | `http://localhost:11434`                                        | Base URL of the local Ollama server   |
-| `OLLAMA_MODEL`       | `qwen3:4b`                                                       | Model name used for local generation  |
+| `OLLAMA_MODEL`       | `qwen2.5:3b`                                                    | Model name used for local generation  |
+| `OLLAMA_TIMEOUT_SECONDS` | `300`                                                       | Timeout for Ollama API calls (seconds) |
 | `BACKEND_URL`        | `http://localhost:8000`                                         | Backend URL used by the Streamlit app |
+| `IMAGE_PROVIDER`     | `mock`                                                          | Image provider ("mock" or "huggingface") |
+| `IMAGE_OUTPUT_DIR`   | `images`                                                        | Directory for generated infographics  |
 
-## Roadmap (Not Yet Implemented)
+## Features Implemented
 
-- Phase 2: Multi-day content series generation using Qwen3 4B via Ollama
-- Phase 3: LinkedIn post drafting per day
-- Phase 4: HTML/CSS → PNG infographic generation
-- Phase 5: BGE-M3 embeddings + vector search
-- Phase 6: Review workflow + status tracking
-- Phase 7: LinkedIn native scheduler integration (manual scheduling assist only —
-  no browser automation or API auto-publishing)
+### Phase 1: Foundation ✅
+- FastAPI backend with health checks
+- PostgreSQL database with SQLAlchemy ORM
+- Alembic migrations
+- Ollama integration
+- Streamlit dashboard
+
+### Phase 2: Content Planning ✅
+- Multi-day content plan generation
+- AI-powered topic progression
+- Difficulty levels and categories
+- Day-by-day learning objectives
+
+### Phase 3: Post Generation ✅
+- LinkedIn post generation per topic
+- Edit and regenerate posts
+- Approve posts for publishing
+- Version tracking
+
+### Phase 4: Infographic Generation ✅
+- AI-generated visual specifications
+- HTML/CSS template rendering
+- Playwright-based PNG generation
+- Professional LinkedIn-style infographics
+- Support for multiple aspect ratios (1:1, 4:5, 16:9)
+- Local generation (no cloud APIs required)
+
+## Troubleshooting
+
+### Infographic Generation Issues
+
+If infographic generation fails with timeout errors:
+
+1. **Check Ollama model:** Ensure you're using `qwen2.5:3b` (not `qwen3:4b`)
+   ```bash
+   ollama list
+   ```
+
+2. **Increase timeout:** Edit `.env` and increase `OLLAMA_TIMEOUT_SECONDS`
+   ```bash
+   OLLAMA_TIMEOUT_SECONDS=600
+   ```
+
+3. **Verify Chromium:** Ensure Playwright browsers are installed
+   ```bash
+   playwright install chromium
+   ```
+
+4. **Check logs:** Backend terminal shows detailed error messages
+
+See `INFOGRAPHIC_FIX_REPORT.md` for complete troubleshooting guide.
 
 ## Notes
 

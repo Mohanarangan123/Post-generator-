@@ -13,8 +13,6 @@ from app.schemas.image import VisualSpec
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_TIMEOUT_SECONDS = 120.0
-
 
 class VisualSpecGenerationError(Exception):
     """Raised when VisualSpec generation fails."""
@@ -26,17 +24,25 @@ def _build_visual_spec_prompt(post, topic) -> str:
     if topic and getattr(topic, "day_number", None) is not None:
         parts.append(f"Day Number: {topic.day_number}")
     if topic and getattr(topic, "title", None):
-        parts.append(f"Topic Title: {topic.title}")
+        # Sanitize title: remove problematic characters
+        title_clean = topic.title.encode('ascii', errors='replace').decode('ascii')
+        title_clean = title_clean.replace('?', ' ')
+        parts.append(f"Topic Title: {title_clean}")
     if topic and getattr(topic, "main_subject", None):
-        parts.append(f"Subject: {topic.main_subject}")
+        subject_clean = topic.main_subject.encode('ascii', errors='replace').decode('ascii')
+        subject_clean = subject_clean.replace('?', ' ')
+        parts.append(f"Subject: {subject_clean}")
     if topic and getattr(topic, "category", None):
         parts.append(f"Category: {topic.category}")
     if topic and getattr(topic, "difficulty", None):
         parts.append(f"Difficulty: {topic.difficulty}")
     if post and getattr(post, "content", None):
-        # Sanitize content by encoding to ASCII, replacing non-ASCII with '?'
-        # This removes emoji and other problematic Unicode characters
+        # Sanitize content: encode to ASCII, remove emoji and non-ASCII
+        # Replace '?' from encode errors with space for readability
         content_sanitized = post.content.encode('ascii', errors='replace').decode('ascii')
+        content_sanitized = content_sanitized.replace('?', ' ')
+        # Remove multiple spaces
+        content_sanitized = ' '.join(content_sanitized.split())
         parts.append(f"Post Content:\n{content_sanitized[:1000]}")
 
     context = "\n".join(parts)
@@ -80,14 +86,22 @@ async def _call_ollama(prompt: str) -> str:
         "prompt": prompt,
         "stream": False,
     }
+    timeout_seconds = settings.ollama_timeout_seconds
     try:
-        async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT_SECONDS) as client:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            logger.info(f"Calling Ollama at {url} (timeout: {timeout_seconds}s)")
             response = await client.post(url, json=payload)
             response.raise_for_status()
         return response.json().get("response", "")
     except httpx.ConnectError as exc:
         raise VisualSpecGenerationError(
             f"Ollama is unreachable at {settings.ollama_base_url}: {exc}"
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise VisualSpecGenerationError(
+            f"Ollama request timed out after {timeout_seconds}s. "
+            f"The model '{settings.ollama_model}' may be slow on this system. "
+            f"Try increasing OLLAMA_TIMEOUT_SECONDS in .env or use a smaller model like qwen2.5:3b."
         ) from exc
 
 

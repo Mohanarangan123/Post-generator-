@@ -280,6 +280,8 @@ def test_html_template_contains_required_elements():
     title, and each key point.
     **Validates: Requirements 5.1, 5.2, 5.4**
     """
+    import html as html_lib
+    
     valid_spec = VisualSpec(
         day_number=1,
         title="Python Basics",
@@ -293,10 +295,10 @@ def test_html_template_contains_required_elements():
     )
     html = build_html(valid_spec, b"")
     assert "DAY 01" in html
-    assert "Python Basics" in html
-    assert "Point A" in html
-    assert "Point B" in html
-    assert "Point C" in html
+    assert html_lib.escape(valid_spec.title) in html
+    assert html_lib.escape("Point A") in html
+    assert html_lib.escape("Point B") in html
+    assert html_lib.escape("Point C") in html
 
 
 def test_image_model_persistence_round_trip(db_session):
@@ -505,8 +507,10 @@ def test_html_template_contains_title(
 ):
     """
     **Validates: Requirements 5.2, 5.9, 11.6**
-    For any valid VisualSpec v, build_html(v, b"") contains v.title
+    For any valid VisualSpec v, build_html(v, b"") contains v.title (HTML-escaped if needed)
     """
+    import html as html_lib
+    
     v = VisualSpec(
         day_number=day_number,
         title=title,
@@ -519,7 +523,8 @@ def test_html_template_contains_title(
         aspect_ratio=aspect_ratio,
     )
     html = build_html(v, b"")
-    assert v.title in html
+    # Check for HTML-escaped version of title (handles special chars like quotes)
+    assert html_lib.escape(v.title) in html
 
 
 # ===========================================================================

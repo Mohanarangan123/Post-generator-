@@ -14,7 +14,13 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.config import get_settings
 from app.models.image import ImageModel, ImageStatus
 from app.models.post import PostModel
-from app.services.image_providers import get_image_provider
+from app.services.image_providers import (
+    ImageProviderError,
+    MockImageProvider,
+    build_image_prompt,
+    get_image_provider,
+    load_image,
+)
 from app.services.image_repository import ImageRepository
 from app.services.image_renderer import render_html_to_png
 from app.services.image_template import ASPECT_RATIO_DIMS, build_html
@@ -59,13 +65,24 @@ async def run_pipeline(post_id: UUID, db: Session) -> ImageModel:
         # Step 3: Mark GENERATING and get provider
         logger.info("Step 3: Getting image provider")
         repo.update_status(image.id, ImageStatus.GENERATING)
-        provider = get_image_provider(settings)
+        provider = None
+        try:
+            provider = get_image_provider(settings)
+        except ImageProviderError:
+            logger.warning("Configured image provider unavailable; falling back to MockImageProvider.")
+            provider = MockImageProvider()
         logger.info("Using provider: %s", type(provider).__name__)
 
-        # Step 4: Generate background image
-        logger.info("Step 4: Generating background image")
-        bg_bytes = await provider.generate(visual_spec.visual_concept)
-        logger.info("Background image generated: %d bytes", len(bg_bytes))
+        # Step 4: Generate illustration asset (not the full infographic)
+        logger.info("Step 4: Generating illustration asset")
+        image_prompt = build_image_prompt(visual_spec)
+        try:
+            bg_bytes = await load_image(provider, image_prompt, visual_spec)
+        except Exception:
+            logger.warning("Provider image validation failed; using deterministic SVG fallback.")
+            provider = MockImageProvider()
+            bg_bytes = await load_image(provider, image_prompt, visual_spec)
+        logger.info("Illustration asset generated: %d bytes", len(bg_bytes))
 
         # Step 5: Build HTML
         logger.info("Step 5: Building HTML template")
@@ -94,7 +111,7 @@ async def run_pipeline(post_id: UUID, db: Session) -> ImageModel:
         )
         # Also set provider name and prompt on the record
         image.provider = type(provider).__name__
-        image.prompt = visual_spec.visual_concept
+        image.prompt = image_prompt
         db.commit()
         db.refresh(image)
         logger.info("Pipeline completed for post %s → %s", post_id, output_path)

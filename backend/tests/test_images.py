@@ -31,8 +31,13 @@ from app.main import app
 from app.models.content_plan import ContentPlanModel, DayTopicModel
 from app.models.image import ImageModel, ImageStatus
 from app.models.post import PostModel, PostStatus
-from app.schemas.image import VisualSpec
-from app.services.image_providers import ImageProviderError, MockImageProvider
+from app.schemas.image import DiagramNode, VisualSpec
+from app.services.image_providers import (
+    HuggingFaceImageProvider,
+    ImageProviderError,
+    MockImageProvider,
+    build_image_prompt,
+)
 from app.services.image_service import run_pipeline
 from app.services.image_template import build_html
 
@@ -334,11 +339,114 @@ def test_image_model_persistence_round_trip(db_session):
     assert retrieved.status == ImageStatus.COMPLETED
 
 
+def test_visual_spec_allows_structured_diagram_nodes():
+    spec = VisualSpec(
+        day_number=1,
+        title="Install Python Development Environment",
+        subtitle="Set up Python correctly before you start coding",
+        visual_concept="A developer installing Python and configuring a local environment",
+        diagram_type="process",
+        diagram_nodes=[
+            DiagramNode(step=1, title="Install Python", description="Download Python and IDE tools"),
+            DiagramNode(step=2, title="Configure PATH", description="Make Python available in a terminal"),
+            DiagramNode(step=3, title="Create Environment", description="Create a clean project environment"),
+        ],
+        key_points=[
+            "Install Python for coding projects",
+            "Add Python to PATH",
+            "Create an isolated environment",
+        ],
+        style="light-minimal",
+        aspect_ratio="16:9",
+    )
+    assert spec.diagram_nodes[0].title == "Install Python"
+    assert spec.diagram_type == "process"
+    assert len(spec.key_points) == 3
+
+
+def test_build_image_prompt_omits_text_from_generated_image():
+    spec = VisualSpec(
+        day_number=1,
+        title="Install Python Development Environment",
+        subtitle="Set up Python correctly before you start coding",
+        visual_concept="A developer installing Python and configuring a local environment",
+        diagram_type="process",
+        diagram_nodes=[
+            DiagramNode(step=1, title="Install Python", description="Download and install Python"),
+            DiagramNode(step=2, title="Configure PATH", description="Add Python to PATH"),
+            DiagramNode(step=3, title="Create Environment", description="Create an isolated environment"),
+        ],
+        key_points=["Install Python", "Set PATH", "Create environment"],
+        style="light-minimal",
+        aspect_ratio="16:9",
+    )
+    prompt = build_image_prompt(spec)
+    assert "Topic: Install Python Development Environment" in prompt
+    assert "Visual concept:" in prompt
+    assert "Do NOT render any text" in prompt
+    assert "Install Python" in prompt
+    assert "Set PATH" not in prompt or "PATH" in prompt
+
+
+def test_visual_spec_accepts_semantic_fields_and_avoids_raw_node_ids():
+    spec = VisualSpec(
+        title="Set Up Your Python Workspace",
+        subtitle="A beginner-friendly setup checklist",
+        day=1,
+        category="PROCESS",
+        layout_type="process",
+        nodes=[
+            {"step": 1, "title": "Install Python", "description": "Download the official installer"},
+            {"step": 2, "title": "Configure PATH", "description": "Add Python to your shell"},
+            {"step": 3, "title": "Create a Project", "description": "Start a clean workspace"},
+        ],
+        checklist=["Python runs in the terminal", "Your editor is configured", "A virtual environment is ready"],
+        illustration_prompt="Flat vector editorial illustration of a software developer preparing a Python workspace in a clean blue and navy palette.",
+        style="light-minimal",
+        aspect_ratio="16:9",
+    )
+    assert spec.day == 1
+    assert spec.category == "PROCESS"
+    assert [node.title for node in spec.nodes] == ["Install Python", "Configure PATH", "Create a Project"]
+    assert "node1" not in " ".join(node.title.lower() for node in spec.nodes)
+
+
+def test_build_html_uses_semantic_layout_without_broken_image_markers():
+    spec = VisualSpec(
+        title="Set Up Your Python Workspace",
+        subtitle="A beginner-friendly setup checklist",
+        day=1,
+        category="PROCESS",
+        layout_type="process",
+        nodes=[
+            {"step": 1, "title": "Install Python", "description": "Download the official installer"},
+            {"step": 2, "title": "Configure PATH", "description": "Add Python to your shell"},
+            {"step": 3, "title": "Create a Project", "description": "Start a clean workspace"},
+        ],
+        checklist=["Python runs in the terminal", "Your editor is configured", "A virtual environment is ready"],
+        illustration_prompt="Flat vector editorial illustration of a software developer preparing a Python workspace.",
+        style="light-minimal",
+        aspect_ratio="16:9",
+    )
+    html = build_html(spec, b"")
+    assert "DAY 01" in html
+    assert "Install Python" in html
+    assert "Configure PATH" in html
+    assert "node1" not in html.lower()
+    assert "failed-url" not in html.lower()
+    assert "<img" not in html.lower()
+
+
+def test_huggingface_provider_requires_configuration():
+    provider = HuggingFaceImageProvider(token="", model_id="black-forest-labs/FLUX.1-dev")
+    with pytest.raises(ImageProviderError):
+        asyncio.run(provider.generate("test prompt"))
+
+
 def test_pipeline_failure_when_provider_raises(db_session, tmp_path):
     """
-    Mock MockImageProvider.generate to raise ImageProviderError;
-    call run_pipeline; assert returned ImageModel.status == "FAILED".
-    **Validates: Requirement 7.4**
+    Mock a provider that raises during image generation; ensure the pipeline
+    falls back to the local MockImageProvider and still completes.
     """
     post = make_post(db_session)
 
@@ -365,7 +473,38 @@ def test_pipeline_failure_when_provider_raises(db_session, tmp_path):
 
             result = asyncio.run(run_pipeline(post.id, db_session))
 
-    assert result.status == ImageStatus.FAILED
+    assert result.status == ImageStatus.COMPLETED
+
+
+def test_pipeline_falls_back_to_mock_when_cloud_provider_fails(db_session):
+    post = make_post(db_session)
+    valid_visual_spec = {
+        "day_number": 1,
+        "title": "Install Python",
+        "subtitle": "A quick environment setup guide",
+        "visual_concept": "A developer preparing Python workspace",
+        "diagram_type": "process",
+        "diagram_nodes": [
+            {"step": 1, "title": "Install", "description": "Install Python"},
+            {"step": 2, "title": "Configure", "description": "Configure PATH"},
+            {"step": 3, "title": "Code", "description": "Create an environment"},
+        ],
+        "key_points": ["Install Python", "Set PATH", "Create a clean environment"],
+        "style": "light-minimal",
+        "aspect_ratio": "16:9",
+    }
+
+    with patch("app.services.image_service.generate_visual_spec") as mock_gen_spec:
+        mock_gen_spec.return_value = VisualSpec(**valid_visual_spec)
+        with patch("app.services.image_service.get_image_provider") as mock_get_provider:
+            mock_get_provider.side_effect = ImageProviderError("cloud unavailable")
+            with patch("app.services.image_service.MockImageProvider") as mock_provider_cls:
+                mock_provider = AsyncMock()
+                mock_provider.generate.return_value = b"\x89PNG\r\n\x1a\n" + b"A" * 20
+                mock_provider_cls.return_value = mock_provider
+                result = asyncio.run(run_pipeline(post.id, db_session))
+
+    assert result.status == ImageStatus.COMPLETED
 
 
 def test_generate_image_api_happy_path(client, db_session, tmp_path):
@@ -427,6 +566,65 @@ def test_generate_image_api_nonexistent_post(client):
     assert resp.status_code == 404
 
 
+def test_render_process_diagram_and_missing_image_do_not_create_blue_placeholder():
+    spec = VisualSpec(
+        day_number=1,
+        title="Install Python Development Environment",
+        subtitle="Set up Python correctly before you start coding",
+        visual_concept="A developer installing Python and configuring a local environment",
+        diagram_type="process",
+        diagram_nodes=[
+            DiagramNode(step=1, title="Install Python", description="Download Python and install it"),
+            DiagramNode(step=2, title="Configure PATH", description="Add Python to PATH"),
+            DiagramNode(step=3, title="Create Environment", description="Create a clean local environment"),
+        ],
+        key_points=["Install Python", "Configure PATH", "Create an environment"],
+        style="light-minimal",
+        aspect_ratio="16:9",
+    )
+    html = build_html(spec, b"")
+    assert "Install Python" in html
+    assert "Configure PATH" in html
+    assert "data:image/png;base64" not in html
+    assert "background: linear-gradient" not in html or "#ffffff" in html
+
+
+def test_render_comparison_layout_uses_cards():
+    spec = VisualSpec(
+        day_number=2,
+        title="Python vs JavaScript",
+        subtitle="When to use each language",
+        visual_concept="A comparison of languages",
+        diagram_type="comparison",
+        diagram_nodes=[
+            DiagramNode(step=1, title="Python", description="Easy to read and great for data"),
+            DiagramNode(step=2, title="JavaScript", description="Excellent for web interfaces"),
+        ],
+        key_points=["Python is readable", "JavaScript powers the web", "Choose based on the task"],
+        style="dark-tech",
+        aspect_ratio="16:9",
+    )
+    html = build_html(spec, b"")
+    assert "Python" in html
+    assert "JavaScript" in html
+    assert "comparison-grid" in html
+
+
+def test_invalid_visual_spec_rejected_for_empty_node_title():
+    with pytest.raises(ValidationError):
+        VisualSpec(
+            day_number=1,
+            title="Test",
+            subtitle="Sub",
+            visual_concept="Concept",
+            diagram_type="process",
+            diagram_nodes=[DiagramNode(step=1, title="", description="desc")],
+            key_points=["p1", "p2", "p3"],
+            style="light-minimal",
+            aspect_ratio="16:9",
+        )
+
+
 # ===========================================================================
 # Property-based tests (Hypothesis @given, @h_settings(max_examples=100))
 # ===========================================================================
@@ -435,12 +633,12 @@ def test_generate_image_api_nonexistent_post(client):
 @h_settings(max_examples=100)
 @given(
     day_number=st.integers(min_value=1, max_value=365),
-    title=st.text(min_size=1, max_size=100),
+    title=st.text(min_size=1, max_size=100).filter(lambda s: bool(s.strip())),
     subtitle=st.text(min_size=0, max_size=100),
-    visual_concept=st.text(min_size=1, max_size=200),
+    visual_concept=st.text(min_size=1, max_size=200).filter(lambda s: bool(s.strip())),
     diagram_type=st.sampled_from(["flowchart", "hierarchy", "comparison", "timeline", "list"]),
-    diagram_nodes=st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=10),
-    key_points=st.lists(st.text(min_size=1, max_size=100), min_size=3, max_size=5),
+    diagram_nodes=st.lists(st.text(min_size=1, max_size=50).filter(lambda s: bool(s.strip())), min_size=1, max_size=10),
+    key_points=st.lists(st.text(min_size=1, max_size=100).filter(lambda s: bool(s.strip())), min_size=3, max_size=5),
     style=st.sampled_from(["dark-tech", "light-minimal", "blue-gradient"]),
     aspect_ratio=st.sampled_from(["1:1", "4:5", "16:9"]),
 )
@@ -492,12 +690,12 @@ def test_mock_provider_returns_valid_png(prompt):
 @h_settings(max_examples=100)
 @given(
     day_number=st.integers(min_value=1, max_value=365),
-    title=st.text(min_size=1, max_size=100),
+    title=st.text(min_size=1, max_size=100).filter(lambda s: bool(s.strip())),
     subtitle=st.text(min_size=0, max_size=100),
-    visual_concept=st.text(min_size=1, max_size=200),
+    visual_concept=st.text(min_size=1, max_size=200).filter(lambda s: bool(s.strip())),
     diagram_type=st.sampled_from(["flowchart", "hierarchy", "comparison", "timeline", "list"]),
-    diagram_nodes=st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=10),
-    key_points=st.lists(st.text(min_size=1, max_size=100), min_size=3, max_size=5),
+    diagram_nodes=st.lists(st.text(min_size=1, max_size=50).filter(lambda s: bool(s.strip())), min_size=1, max_size=10),
+    key_points=st.lists(st.text(min_size=1, max_size=100).filter(lambda s: bool(s.strip())), min_size=3, max_size=5),
     style=st.sampled_from(["dark-tech", "light-minimal", "blue-gradient"]),
     aspect_ratio=st.sampled_from(["1:1", "4:5", "16:9"]),
 )

@@ -37,10 +37,10 @@ class Settings(BaseSettings):
     backend_url: str = "http://localhost:8000"
 
     # --- Image generation ---
-    image_provider: str = "mock"                                         # "mock" or "huggingface"
-    hf_token: str = ""                                                   # Hugging Face API token
-    hf_image_model: str = "stabilityai/stable-diffusion-xl-base-1.0"   # HF model ID
-    image_output_dir: str = "images"                                     # output directory for PNGs
+    image_provider: str = "mock"  # "mock" or "huggingface"
+    hf_token: str = ""  # Hugging Face API token
+    hf_image_model: str = "black-forest-labs/FLUX.1-dev"  # preferred HF model
+    image_output_dir: str = "images"  # output directory for PNGs
 
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE),

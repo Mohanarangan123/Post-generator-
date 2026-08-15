@@ -1,12 +1,11 @@
-# LinkedIn AI Content Generator (Phase 1-4: Complete)
+# LinkedIn AI Content Generator (Phase 1-3: Complete)
 
 A local, privacy-friendly AI-powered system for generating structured LinkedIn
-educational content series with **AI-generated infographics**. This repository implements:
+educational content series. This repository implements:
 
 - **Phase 1**: Foundation (health checks, database, Ollama connectivity)
 - **Phase 2**: Multi-day content planning
 - **Phase 3**: LinkedIn post generation
-- **Phase 4**: Infographic generation ✅ **WORKING**
 
 ## Tech Stack
 
@@ -17,7 +16,6 @@ educational content series with **AI-generated infographics**. This repository i
 | Database       | PostgreSQL (Docker)    |
 | ORM            | SQLAlchemy 2.x + Alembic |
 | Local LLM      | Ollama + Qwen2.5 3B    |
-| Image Generation | Playwright + Chromium |
 
 > Hardware target: Windows 11, Intel Core Ultra 5 225H, 16 GB RAM, Intel
 > integrated graphics (no dedicated GPU). All local AI usage is CPU/RAM
@@ -208,7 +206,7 @@ docker-compose down
 
 Stop FastAPI and Streamlit with `Ctrl+C` in their respective terminals.
 
-## API Endpoints (Phase 1-4)
+## API Endpoints (Phase 1-3)
 
 | Method | Path      | Description                                    |
 |--------|-----------|-------------------------------------------------|
@@ -222,7 +220,6 @@ Stop FastAPI and Streamlit with `Ctrl+C` in their respective terminals.
 | POST   | `/api/posts/{id}/regenerate` | Regenerate an existing post |
 | POST   | `/api/posts/{id}/approve` | Approve a post |
 | PUT    | `/api/posts/{id}` | Update post content |
-| POST   | `/api/images/generate/{post_id}` | Generate infographic for a post |
 
 ## Environment Variables
 
@@ -233,8 +230,7 @@ Stop FastAPI and Streamlit with `Ctrl+C` in their respective terminals.
 | `OLLAMA_MODEL`       | `qwen2.5:3b`                                                    | Model name used for local generation  |
 | `OLLAMA_TIMEOUT_SECONDS` | `300`                                                       | Timeout for Ollama API calls (seconds) |
 | `BACKEND_URL`        | `http://localhost:8000`                                         | Backend URL used by the Streamlit app |
-| `IMAGE_PROVIDER`     | `mock`                                                          | Image provider ("mock" or "huggingface") |
-| `IMAGE_OUTPUT_DIR`   | `images`                                                        | Directory for generated infographics  |
+
 
 ## Features Implemented
 
@@ -257,43 +253,27 @@ Stop FastAPI and Streamlit with `Ctrl+C` in their respective terminals.
 - Approve posts for publishing
 - Version tracking
 
-### Phase 4: Infographic Generation ✅
-- AI-generated visual specifications
-- HTML/CSS template rendering
-- Playwright-based PNG generation
-- Professional LinkedIn-style infographics
-- Support for multiple aspect ratios (1:1, 4:5, 16:9)
-- Local generation (no cloud APIs required)
-
 ## Troubleshooting
 
-### Infographic Generation Issues
+For backend issues:
 
-If infographic generation fails with timeout errors:
-
-1. **Check Ollama model:** Ensure you're using `qwen2.5:3b` (not `qwen3:4b`)
+1. **Check Ollama connectivity:** Ensure Ollama is running
    ```bash
    ollama list
    ```
 
-2. **Increase timeout:** Edit `.env` and increase `OLLAMA_TIMEOUT_SECONDS`
+2. **Check database:** Ensure PostgreSQL is running via Docker
+   ```bash
+   docker-compose ps
+   ```
+
+3. **Increase timeout:** Edit `.env` and increase `OLLAMA_TIMEOUT_SECONDS` if content generation is slow
    ```bash
    OLLAMA_TIMEOUT_SECONDS=600
    ```
-
-3. **Verify Chromium:** Ensure Playwright browsers are installed
-   ```bash
-   playwright install chromium
-   ```
-
-4. **Check logs:** Backend terminal shows detailed error messages
-
-See `INFOGRAPHIC_FIX_REPORT.md` for complete troubleshooting guide.
 
 ## Notes
 
 - This is a **local-first** system. No LinkedIn browser automation or API
   publishing is implemented, by design, in this or future phases described
   here.
-- Image generation will use CPU-friendly approaches (HTML/CSS → PNG), not
-  GPU-dependent diffusion models.

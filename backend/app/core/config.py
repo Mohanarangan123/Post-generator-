@@ -36,13 +36,6 @@ class Settings(BaseSettings):
     # --- Frontend / CORS ---
     backend_url: str = "http://localhost:8000"
 
-    # --- Image generation ---
-    image_provider: str = "mock"  # "mock" or "huggingface"
-    hf_token: str = ""  # Hugging Face API token
-    hf_image_model: str = "Qwen/Qwen-Image-2512"  # preferred HF model for complete infographic generation
-    hf_inference_provider: str = "fal-ai"  # HF inference provider (e.g., "fal-ai")
-    image_output_dir: str = "images"  # output directory for PNGs
-
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",

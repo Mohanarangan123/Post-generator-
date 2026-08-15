@@ -489,53 +489,6 @@ def render_content_calendar() -> None:
                     else:
                         st.error(f"Approval failed: {err}")
 
-        # ── Visual buttons row (Phase 4) ──
-        if has_post:
-            _, _, _, col_visual_actions = st.columns([1, 4, 2, 5])
-            with col_visual_actions:
-                v1, v2, v3, _, _ = st.columns(5)
-
-                with v1:
-                    if st.button("🎨", key=f"img_gen_{topic_id}", help="Generate Visual"):
-                        with st.spinner(f"Generating infographic for day {topic['day_number']}…"):
-                            ok, resp_data, err = post_json(
-                                f"{BACKEND_URL}/api/images/generate/{post['id']}",
-                                {},
-                                timeout=GENERATE_TIMEOUT_SECONDS,
-                            )
-                        if ok and resp_data:
-                            st.session_state[f"img_{post['id']}"] = resp_data
-                            if resp_data.get("success"):
-                                st.success("Infographic generated successfully!")
-                            else:
-                                error_detail = resp_data.get("status", "Unknown error")
-                                st.error(f"Infographic generation failed: {error_detail}")
-                        else:
-                            st.error(f"Visual generation failed: {err}")
-
-                with v2:
-                    if st.button("🔄🎨", key=f"img_regen_{topic_id}", help="Regenerate Visual"):
-                        with st.spinner(f"Regenerating infographic for day {topic['day_number']}…"):
-                            ok, resp_data, err = post_json(
-                                f"{BACKEND_URL}/api/images/generate/{post['id']}",
-                                {},
-                                timeout=GENERATE_TIMEOUT_SECONDS,
-                            )
-                        if ok and resp_data:
-                            st.session_state[f"img_{post['id']}"] = resp_data
-                            if resp_data.get("success"):
-                                st.success("Infographic regenerated successfully!")
-                            else:
-                                error_detail = resp_data.get("status", "Unknown error")
-                                st.error(f"Infographic regeneration failed: {error_detail}")
-                        else:
-                            st.error(f"Visual regeneration failed: {err}")
-
-                with v3:
-                    view_img_clicked = st.button(
-                        "🖼️", key=f"img_view_{topic_id}", help="View Infographic",
-                    )
-
         # ── View expander ──
         if has_post and view_clicked:
             with st.expander(
@@ -548,39 +501,6 @@ def render_content_calendar() -> None:
                     f"**Generated:** {post.get('created_at', 'unknown')}"
                 )
                 st.text(post.get("content") or "*(no content)*")
-
-        # ── View Infographic ──
-        if has_post and view_img_clicked:
-            img_data = st.session_state.get(f"img_{post['id']}")
-            if img_data and img_data.get("status") == "COMPLETED":
-                image_id = img_data.get("id")
-                if image_id:
-                    # Use backend API to serve the image
-                    image_url = f"{BACKEND_URL}/api/images/file/{image_id}"
-                    
-                    st.markdown(f"### 🖼️ Infographic for Day {topic['day_number']}: {topic['title']}")
-                    
-                    # Post Content
-                    st.markdown("**Post Content:**")
-                    st.text(post.get("content") or "*(no content)*")
-                    
-                    # Visual Specification (collapsible but not nested)
-                    st.markdown("**Visual Specification:**")
-                    with st.expander("Show VisualSpec Details", expanded=False):
-                        st.json(img_data["visual_spec"])
-                    
-                    # Generated Infographic
-                    st.markdown("**Generated Infographic:**")
-                    try:
-                        st.image(image_url, use_container_width=True)
-                    except Exception as e:
-                        st.error(f"Error displaying image: {e}")
-                        st.info("Click 'Generate Visual' to create a new one.")
-                else:
-                    st.warning("Image ID not found in response.")
-                    st.info("Click 'Generate Visual' to create a new one.")
-            else:
-                st.info("No completed infographic yet. Click 'Generate Visual' to create one.")
 
         # ── Edit area ──
         if has_post and edit_clicked:

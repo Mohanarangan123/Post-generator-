@@ -61,9 +61,3 @@ class PostModel(Base):
     day_topic: Mapped["DayTopicModel"] = relationship(  # noqa: F821
         "DayTopicModel", back_populates="posts"
     )
-
-    images: Mapped[list["ImageModel"]] = relationship(  # noqa: F821
-        "ImageModel",
-        back_populates="post",
-        cascade="all, delete-orphan",
-    )

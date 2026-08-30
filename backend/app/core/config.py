@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     # --- Frontend / CORS ---
     backend_url: str = "http://localhost:8000"
 
+    # --- Cloudflare Workers AI (Phase 4: Infographic Generation) ---
+    cloudflare_account_id: str = ""
+    cloudflare_api_token: str = ""
+    cloudflare_image_model: str = "@cf/black-forest-labs/flux-2-klein-9b"
+    cloudflare_image_width: int = 1536
+    cloudflare_image_height: int = 864
+    cloudflare_image_timeout_seconds: float = 120.0
+    cloudflare_image_max_retries: int = 2
+    infographic_output_dir: str = "outputs/infographics"
+
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",

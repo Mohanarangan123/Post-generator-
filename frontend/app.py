@@ -1,5 +1,5 @@
 """
-Streamlit frontend — Phase 3: AI LinkedIn Content Planner + Post Generation.
+Streamlit frontend — Phase 1-4: AI LinkedIn Content Planner + Post Generation + Infographics.
 
 Tab 1 (📅 Content Planner):
   - Form to generate a day-by-day LinkedIn learning plan via the backend API
@@ -16,6 +16,14 @@ Tab 3 (📋 Content Calendar):
   - Generate All Posts button (bulk)
   - View: expander with post content, status, timestamp
   - Edit: text_area pre-filled with content + Save button
+
+Tab 4 (🎨 Infographic):
+  - Phase 4: Cloudflare Workers AI infographic generation
+  - Select a post
+  - Preview and edit InfographicSpec
+  - Generate infographic with Cloudflare Flux
+  - Download PNG
+  - Retry failed generations
 """
 import logging
 import os
@@ -531,13 +539,275 @@ def render_content_calendar() -> None:
 
 
 # ──────────────────────────────────────────────
+# Tab 4: Infographic Generation (Phase 4)
+# ──────────────────────────────────────────────
+
+def render_infographic_generator() -> None:
+    """Phase 4: Cloudflare Workers AI infographic generation."""
+    st.header("🎨 Infographic Generator")
+    st.caption("Phase 4: Generate professional educational infographics using Cloudflare Workers AI.")
+
+    # Free quota warning
+    st.info(
+        "🔵 **Cloudflare Workers AI:** This uses Cloudflare's free daily neuron allocation. "
+        "Usage beyond the free limit may require billing. "
+        "[Learn more](https://developers.cloudflare.com/workers-ai/)"
+    )
+
+    # Step 1: Select a post
+    st.subheader("1️⃣ Select a Post")
+
+    # Load posts from the real content plans instead of a placeholder plan ID.
+    all_posts: list[dict] = []
+    seen_post_ids: set[str] = set()
+
+    # Prefer the currently selected plan from the app state if available.
+    current_plan = st.session_state.get("current_plan")
+    if current_plan and current_plan.get("id"):
+        ok_plan_posts, plan_posts_data, plan_posts_err = fetch_json(
+            f"{BACKEND_URL}/api/posts/by-plan/{current_plan['id']}", timeout=30
+        )
+        if ok_plan_posts and plan_posts_data:
+            for post in plan_posts_data:
+                post_id = str(post.get("id"))
+                if post_id not in seen_post_ids:
+                    all_posts.append(post)
+                    seen_post_ids.add(post_id)
+
+    if not all_posts:
+        ok_plans, plans_data, _ = fetch_json(f"{BACKEND_URL}/api/content-plans", timeout=10)
+        if ok_plans and plans_data:
+            for plan in plans_data:
+                ok_posts, posts_for_plan, _ = fetch_json(
+                    f"{BACKEND_URL}/api/posts/by-plan/{plan['id']}", timeout=10
+                )
+                if ok_posts and posts_for_plan:
+                    for post in posts_for_plan:
+                        post_id = str(post.get("id"))
+                        if post_id not in seen_post_ids:
+                            all_posts.append(post)
+                            seen_post_ids.add(post_id)
+
+    if not all_posts:
+        ok_prev_posts, previous_posts_data, err = fetch_json(
+            f"{BACKEND_URL}/api/posts/by-plan/00000000-0000-0000-0000-000000000000",
+            timeout=10,
+        )
+        if ok_prev_posts and previous_posts_data:
+            for post in previous_posts_data:
+                post_id = str(post.get("id"))
+                if post_id not in seen_post_ids:
+                    all_posts.append(post)
+                    seen_post_ids.add(post_id)
+
+    if not all_posts:
+        st.warning("No posts available. Generate posts first in the Content Calendar tab.")
+        return
+
+    # Filter posts with content
+    posts_with_content = [p for p in all_posts if p.get("content")]
+    if not posts_with_content:
+        st.warning("No posts with content available.")
+        return
+
+    # Post selector
+    post_options = {
+        f"Day {p.get('day_number', '?')}: {p.get('content', '').split(chr(10))[0][:60]}": p
+        for p in posts_with_content
+    }
+
+    selected_post_label = st.selectbox(
+        "Select a post",
+        options=list(post_options.keys()),
+        label_visibility="collapsed",
+    )
+
+    selected_post = post_options.get(selected_post_label)
+    if not selected_post:
+        st.error("Post selection failed")
+        return
+
+    post_id = selected_post.get("id")
+
+    # Step 2: Configure infographic
+    st.subheader("2️⃣ Configure Infographic")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        num_panels = st.selectbox(
+            "Number of panels",
+            options=[3, 4],
+            index=0,
+            help="3 or 4 content panels"
+        )
+
+    with col2:
+        theme = st.selectbox(
+            "Visual theme",
+            options=["blue_navy", "light_blue", "professional_tech"],
+            index=0,
+            help="Professional educational infographic style"
+        )
+
+    accent_color = st.selectbox(
+        "Accent color",
+        options=["cyan", "teal", "white", "navy"],
+        index=0,
+    )
+
+    # Step 3: Generate
+    st.subheader("3️⃣ Generate Infographic")
+
+    col_gen, col_info = st.columns([2, 3])
+
+    with col_gen:
+        # Duplicate-click prevention using session state
+        if "last_infographic_post_id" not in st.session_state:
+            st.session_state["last_infographic_post_id"] = None
+        if "last_infographic_generation_id" not in st.session_state:
+            st.session_state["last_infographic_generation_id"] = None
+
+        is_generating = (
+            st.session_state.get("last_infographic_post_id") == post_id
+            and st.session_state.get("last_infographic_generation_id") is not None
+        )
+
+        if st.button(
+            "🚀 Generate Infographic",
+            disabled=is_generating,
+            key="btn_generate_infographic",
+        ):
+            st.session_state["last_infographic_post_id"] = post_id
+
+            with st.spinner("Generating infographic with Cloudflare Flux…"):
+                ok, resp_data, err = post_json(
+                    f"{BACKEND_URL}/api/posts/{post_id}/infographic",
+                    {
+                        "num_panels": num_panels,
+                        "theme": theme,
+                        "accent_color": accent_color,
+                    },
+                    timeout=180,  # Cloudflare can be slow
+                )
+
+            if ok and resp_data:
+                generation = resp_data.get("generation")
+                if generation:
+                    st.session_state["last_infographic_generation_id"] = generation.get("id")
+                    st.session_state["last_infographic_generation"] = generation
+                    st.success(resp_data.get("message", "Infographic generated!"))
+                    st.rerun()
+                else:
+                    st.error("Generation failed: No generation data returned")
+            else:
+                st.error(f"Generation failed: {err}")
+
+    with col_info:
+        st.markdown("**Provider:** 🔵 Cloudflare Workers AI (Flux)")
+        st.markdown("**Model:** `@cf/black-forest-labs/flux-2-klein-9b`")
+        st.markdown("**Size:** 1536 × 864 (16:9)")
+
+    # Step 4: View result
+    st.subheader("4️⃣ Generation Status & Download")
+
+    if st.session_state.get("last_infographic_generation"):
+        gen = st.session_state["last_infographic_generation"]
+        gen_id = gen.get("id")
+
+        # Fetch latest status
+        ok, status_data, err = fetch_json(f"{BACKEND_URL}/api/infographics/{gen_id}")
+
+        if ok and status_data:
+            gen = status_data.get("generation")
+            status = gen.get("status", "UNKNOWN")
+            created_at = gen.get("created_at", "unknown")
+
+            st.markdown(f"**Status:** `{status}`")
+            st.markdown(f"**Generation ID:** `{gen_id}`")
+            st.markdown(f"**Created:** {created_at}")
+
+            if status == "COMPLETED":
+                st.success("✅ Infographic ready!")
+
+                # Download button
+                if gen.get("output_path"):
+                    ok_img, img_data, err_img = fetch_json(
+                        f"{BACKEND_URL}/api/infographics/{gen_id}/image",
+                        timeout=10,
+                    )
+
+                    if ok_img and img_data:
+                        st.image(img_data, use_container_width=True)
+
+                        # Download link
+                        col_dl, col_retry = st.columns(2)
+                        with col_dl:
+                            st.download_button(
+                                label="📥 Download PNG",
+                                data=img_data,
+                                file_name=f"infographic_{gen_id}.png",
+                                mime="image/png",
+                            )
+
+                        with col_retry:
+                            if st.button("🔄 Regenerate", key="btn_regenerate_image"):
+                                ok, resp, err = post_json(
+                                    f"{BACKEND_URL}/api/infographics/{gen_id}/retry",
+                                    {"regenerate_image": True},
+                                    timeout=180,
+                                )
+                                if ok:
+                                    st.success("Regeneration started!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Retry failed: {err}")
+
+                    elif err_img:
+                        st.error(f"Could not load image: {err_img}")
+
+            elif status == "PROCESSING":
+                st.info("⏳ Generating image… This may take 1-2 minutes.")
+                if st.button("🔄 Refresh Status"):
+                    st.rerun()
+
+            elif status == "FAILED":
+                error_msg = gen.get("error_message", "Unknown error")
+                st.error(f"❌ Generation failed: {error_msg}")
+
+                if st.button("🔄 Retry Generation"):
+                    ok, resp, err = post_json(
+                        f"{BACKEND_URL}/api/infographics/{gen_id}/retry",
+                        {"regenerate_image": True},
+                        timeout=180,
+                    )
+                    if ok:
+                        st.success("Retry started!")
+                        st.rerun()
+                    else:
+                        st.error(f"Retry failed: {err}")
+
+            elif status == "PENDING":
+                st.info("📋 Pending generation…")
+                if st.button("🔄 Check Status"):
+                    st.rerun()
+    else:
+        st.info("Generate an infographic to see results here.")
+
+
+# ──────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────
 
 def main() -> None:
     st.title("🧠 LinkedIn AI Content Generator")
 
-    tab1, tab2, tab3 = st.tabs(["📅 Content Planner", "📊 System Status", "📋 Content Calendar"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📅 Content Planner",
+        "📊 System Status",
+        "📋 Content Calendar",
+        "🎨 Infographic (Phase 4)",
+    ])
 
     with tab1:
         render_content_planner()
@@ -547,6 +817,10 @@ def main() -> None:
 
     with tab3:
         render_content_calendar()
+
+    with tab4:
+        render_infographic_generator()
+
 
 
 if __name__ == "__main__":

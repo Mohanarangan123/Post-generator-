@@ -27,6 +27,7 @@ Tab 4 (🎨 Infographic):
 """
 import logging
 import os
+from urllib.parse import urlencode
 
 import pandas as pd
 import requests
@@ -72,6 +73,22 @@ def fetch_json(url: str, timeout: int = REQUEST_TIMEOUT_SECONDS) -> tuple[bool, 
         msg = f"Unexpected error calling {url}: {exc}"
         logger.error(msg)
         return False, None, msg
+
+
+def fetch_bytes(url: str, timeout: int = REQUEST_TIMEOUT_SECONDS) -> tuple[bool, bytes | None, str | None]:
+    """GET binary content such as a generated PNG without JSON decoding."""
+    try:
+        response = requests.get(url, timeout=timeout)
+        response.raise_for_status()
+        return True, response.content, None
+    except requests.exceptions.ConnectionError:
+        return False, None, f"Could not connect to backend at {url}. Is FastAPI running?"
+    except requests.exceptions.Timeout:
+        return False, None, f"Request to {url} timed out."
+    except requests.exceptions.HTTPError as exc:
+        return False, None, f"API error ({exc.response.status_code}): {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return False, None, f"Unexpected error calling {url}: {exc}"
 
 
 def post_json(url: str, payload: dict, timeout: int = REQUEST_TIMEOUT_SECONDS) -> tuple[bool, dict | None, str | None]:
@@ -681,13 +698,14 @@ def render_infographic_generator() -> None:
             st.session_state["last_infographic_post_id"] = post_id
 
             with st.spinner("Generating infographic with Cloudflare Flux…"):
+                query = urlencode({
+                    "num_panels": num_panels,
+                    "theme": theme,
+                    "accent_color": accent_color,
+                })
                 ok, resp_data, err = post_json(
-                    f"{BACKEND_URL}/api/posts/{post_id}/infographic",
-                    {
-                        "num_panels": num_panels,
-                        "theme": theme,
-                        "accent_color": accent_color,
-                    },
+                    f"{BACKEND_URL}/api/posts/{post_id}/infographic?{query}",
+                    {},
                     timeout=180,  # Cloudflare can be slow
                 )
 
@@ -732,7 +750,7 @@ def render_infographic_generator() -> None:
 
                 # Download button
                 if gen.get("output_path"):
-                    ok_img, img_data, err_img = fetch_json(
+                    ok_img, img_data, err_img = fetch_bytes(
                         f"{BACKEND_URL}/api/infographics/{gen_id}/image",
                         timeout=10,
                     )

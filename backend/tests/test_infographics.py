@@ -356,6 +356,11 @@ def test_infographic_spec_builder_from_post(db_session):
     assert spec.title
     assert len(spec.panels) == 3
     assert all(p.number in (1, 2, 3) for p in spec.panels)
+    assert spec.panels[0].description.startswith("Machine learning is a way")
+    assert spec.panels[1].description.startswith("Email spam filters")
+    assert spec.panels[2].description.startswith("Collect training data")
+    assert all("See " not in panel.description for panel in spec.panels)
+    assert spec.summary == "ML is about learning patterns from data, not writing explicit rules."
     assert len(spec.summary) <= 180
 
 
@@ -405,6 +410,8 @@ def test_infographic_renderer_compose():
 
     assert composed.size == (1536, 864)
     assert composed.mode == "RGB"
+    assert sum(composed.getpixel((10, 10))) < 200
+    assert sum(composed.getpixel((30, 150))) < sum(background.getpixel((30, 150)))
 
 
 def test_infographic_renderer_text_wrapping():
@@ -715,8 +722,8 @@ def test_infographic_download_missing_image(client, db_session):
     assert response.status_code == 404
 
 
-def test_infographic_retry_non_failed_generation(client, db_session):
-    """Test retrying a non-failed generation."""
+def test_infographic_retry_pending_generation_is_rejected(client, db_session):
+    """Test retrying a still-pending generation."""
     plan = create_test_content_plan(db_session)
     topic = create_test_day_topic(db_session, plan.id)
     post = create_test_post(db_session, topic.id)
@@ -736,3 +743,32 @@ def test_infographic_retry_non_failed_generation(client, db_session):
         json={"regenerate_image": True},
     )
     assert response.status_code == 400
+
+
+def test_infographic_regenerate_completed_generation(client, db_session):
+    """A visually bad completed image can be regenerated from the UI."""
+    plan = create_test_content_plan(db_session)
+    topic = create_test_day_topic(db_session, plan.id)
+    post = create_test_post(db_session, topic.id)
+    generation = InfographicGenerationModel(
+        post_id=post.id,
+        provider="cloudflare",
+        model="@cf/test",
+        prompt_hash="hash123",
+        status=InfographicStatus.COMPLETED,
+        output_path="existing.png",
+    )
+    db_session.add(generation)
+    db_session.commit()
+
+    with patch("app.api.routes.infographics.InfographicService") as service_class:
+        service_class.return_value.generate_infographic = AsyncMock(
+            return_value=(True, "Infographic generated successfully", "existing.png")
+        )
+        response = client.post(
+            f"/api/infographics/{generation.id}/retry",
+            json={"regenerate_image": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True

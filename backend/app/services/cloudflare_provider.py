@@ -12,10 +12,9 @@ Handles:
 - Request ID logging
 """
 import base64
+import asyncio
 import hashlib
-import json
 import logging
-import time
 from typing import Optional
 
 import httpx
@@ -207,8 +206,7 @@ class CloudflareWorkersAIProvider:
                                 "Quota exhausted (429). Retrying after %s seconds...",
                                 retry_after_secs,
                             )
-                            await httpx.AsyncClient().aclose()
-                            time.sleep(retry_after_secs)
+                            await asyncio.sleep(retry_after_secs)
                             continue
 
                         logger.error(
@@ -234,8 +232,7 @@ class CloudflareWorkersAIProvider:
                             logger.warning(
                                 "Server error (%d). Retrying...", response.status_code
                             )
-                            await httpx.AsyncClient().aclose()
-                            time.sleep(2 ** attempt)  # exponential backoff
+                            await asyncio.sleep(2 ** attempt)  # exponential backoff
                             continue
 
                         logger.error(
@@ -247,8 +244,11 @@ class CloudflareWorkersAIProvider:
 
                     # Success: 200 OK
                     if response.status_code == 200:
-                        # Cloudflare Flux returns JSON with base64-encoded image
-                        try:
+                        content_type = str(response.headers.get("content-type", "")).lower()
+
+                        # Depending on the model/API version, Cloudflare may return
+                        # JSON containing base64 or the image bytes directly.
+                        if "application/json" in content_type:
                             response_data = response.json()
                             logger.debug("Cloudflare response: %s", str(response_data)[:200])
                             
@@ -272,19 +272,15 @@ class CloudflareWorkersAIProvider:
                                 len(image_bytes),
                             )
                             return image_bytes
-                        
-                        except json.JSONDecodeError:
-                            # If not JSON, assume binary response
-                            image_bytes = response.content
-                            logger.debug(
-                                "Response is binary (not JSON), length: %d", len(image_bytes)
-                            )
-                            await self._validate_image_bytes(image_bytes)
-                            logger.info(
-                                "Cloudflare Flux image generated successfully (%d bytes)",
-                                len(image_bytes),
-                            )
-                            return image_bytes
+
+                        image_bytes = response.content
+                        logger.debug("Binary image response length: %d", len(image_bytes))
+                        await self._validate_image_bytes(image_bytes)
+                        logger.info(
+                            "Cloudflare Flux image generated successfully (%d bytes)",
+                            len(image_bytes),
+                        )
+                        return image_bytes
 
                     logger.error(
                         "Unexpected Cloudflare response (%d)", response.status_code
@@ -300,8 +296,7 @@ class CloudflareWorkersAIProvider:
                             attempt + 1,
                             self.max_retries + 1,
                         )
-                        await httpx.AsyncClient().aclose()
-                        time.sleep(2 ** attempt)
+                        await asyncio.sleep(2 ** attempt)
                         continue
 
                     logger.error("Request timeout after %d retries", self.max_retries)
@@ -322,8 +317,7 @@ class CloudflareWorkersAIProvider:
                             attempt + 1,
                             self.max_retries + 1,
                         )
-                        await httpx.AsyncClient().aclose()
-                        time.sleep(2 ** attempt)
+                        await asyncio.sleep(2 ** attempt)
                         continue
 
                     logger.error("HTTP error after %d retries: %s", self.max_retries, exc)

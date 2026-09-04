@@ -27,6 +27,10 @@ class FontHelper:
         self.font_candidates = [
             "DejaVuSans.ttf",
             "DejaVuSansBold.ttf",
+            "segoeui.ttf",
+            "segoeuib.ttf",
+            "arial.ttf",
+            "arialbd.ttf",
             "LiberationSans-Regular.ttf",
             "LiberationSans-Bold.ttf",
             "NotoSans-Regular.ttf",
@@ -80,6 +84,8 @@ class FontHelper:
 
         candidates = [
             "DejaVuSansBold.ttf" if bold else "DejaVuSans.ttf",
+            "segoeuib.ttf" if bold else "segoeui.ttf",
+            "arialbd.ttf" if bold else "arial.ttf",
             "LiberationSans-Bold.ttf" if bold else "LiberationSans-Regular.ttf",
             "NotoSans-Bold.ttf" if bold else "NotoSans-Regular.ttf",
         ]
@@ -144,9 +150,10 @@ class InfographicRenderer:
         self.padding = 15
         self.line_spacing = 1.3
 
-        # Banner dimensions
-        self.title_banner_height = 100
-        self.summary_banner_height = 80
+        # Deterministic overlay regions. The generated image supplies artwork only;
+        # these regions guarantee that text remains complete and readable.
+        self.title_banner_height = 120
+        self.summary_banner_height = 96
 
         # Panel layout
         self.content_height = (
@@ -298,23 +305,39 @@ class InfographicRenderer:
         if background_image.mode != "RGB":
             background_image = background_image.convert("RGB")
 
-        # Create a copy for composition
-        image = background_image.copy()
-        draw = ImageDraw.Draw(image)
+        # Compose on RGBA so contrast panels can remain translucent.
+        image = background_image.convert("RGBA")
+        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        title_fill = (4, 18, 45, 238)
+        card_fill = (4, 25, 55, 188)
+        card_header_fill = (4, 25, 55, 250)
+        summary_fill = (4, 18, 45, 238)
+        border_fill = (47, 230, 235, 235)
+
+        draw.rectangle(
+            (0, 0, self.width, self.title_banner_height + self.margin),
+            fill=title_fill,
+        )
+        draw.rectangle(
+            (0, self.height - self.summary_banner_height, self.width, self.height),
+            fill=summary_fill,
+        )
 
         # Calculate regions
         title_box = (
             self.margin,
             self.margin,
             self.width - self.margin,
-            self.title_banner_height,
+            self.title_banner_height + self.margin,
         )
 
         panels_box = (
             self.margin,
             self.title_banner_height,
             self.width - self.margin,
-            self.height - self.summary_banner_height,
+            self.height - self.summary_banner_height - self.margin,
         )
 
         summary_box = (
@@ -323,6 +346,45 @@ class InfographicRenderer:
             self.width - self.margin,
             self.height - self.margin,
         )
+
+        # Draw panel cards before typography so AI artwork cannot reduce contrast.
+        num_panels = len(panels)
+        if not num_panels:
+            raise ValueError("At least one panel is required")
+        panel_gap = 18
+        available_width = panels_box[2] - panels_box[0] - panel_gap * (num_panels - 1)
+        panel_width = available_width // num_panels
+        panel_height = panels_box[3] - panels_box[1]
+        for i in range(num_panels):
+            panel_x = panels_box[0] + i * (panel_width + panel_gap)
+            draw.rounded_rectangle(
+                (panel_x, panels_box[1], panel_x + panel_width, panels_box[3]),
+                radius=22,
+                fill=card_fill,
+                outline=border_fill,
+                width=3,
+            )
+            # Keep the complete heading/description area opaque. This masks any
+            # accidental model-generated lettering while leaving artwork visible
+            # in the lower portion of each card.
+            draw.rectangle(
+                (
+                    panel_x + 3,
+                    panels_box[1] + 3,
+                    panel_x + panel_width - 3,
+                    panels_box[1] + 190,
+                ),
+                fill=card_header_fill,
+            )
+            draw.rounded_rectangle(
+                (panel_x, panels_box[1], panel_x + panel_width, panels_box[3]),
+                radius=22,
+                outline=border_fill,
+                width=3,
+            )
+
+        image = Image.alpha_composite(image, overlay)
+        draw = ImageDraw.Draw(image)
 
         # Draw title
         title_font = self.font_helper.get_font(48, bold=True)
@@ -342,14 +404,35 @@ class InfographicRenderer:
             logger.warning("Title text overflow")
 
         # Draw panels
-        num_panels = len(panels)
-        panel_width = (panels_box[2] - panels_box[0]) // num_panels
-        panel_height = panels_box[3] - panels_box[1]
-
         sorted_panels = sorted(panels, key=lambda p: p.get("number", 999))
         for i, panel in enumerate(sorted_panels):
-            panel_x = panels_box[0] + i * panel_width
+            panel_x = panels_box[0] + i * (panel_width + panel_gap)
             panel_y = panels_box[1]
+
+            # Number badge establishes a reliable visual sequence.
+            badge_radius = 22
+            badge_center = (panel_x + self.padding + badge_radius, panel_y + self.padding + badge_radius)
+            draw.ellipse(
+                (
+                    badge_center[0] - badge_radius,
+                    badge_center[1] - badge_radius,
+                    badge_center[0] + badge_radius,
+                    badge_center[1] + badge_radius,
+                ),
+                fill=border_fill,
+            )
+            badge_font = self.font_helper.get_font(22, bold=True)
+            badge_text = str(panel.get("number", i + 1))
+            badge_bbox = draw.textbbox((0, 0), badge_text, font=badge_font)
+            draw.text(
+                (
+                    badge_center[0] - (badge_bbox[2] - badge_bbox[0]) // 2,
+                    badge_center[1] - (badge_bbox[3] - badge_bbox[1]) // 2 - badge_bbox[1],
+                ),
+                badge_text,
+                font=badge_font,
+                fill=(4, 18, 45, 255),
+            )
 
             # Panel heading
             heading_font = self.font_helper.get_font(24, bold=True)
@@ -357,7 +440,7 @@ class InfographicRenderer:
             heading_success, heading_height = self._draw_wrapped_text(
                 draw,
                 panel.get("heading", ""),
-                (panel_x + self.padding, panel_y + self.padding),
+                (panel_x + self.padding, panel_y + self.padding + 58),
                 heading_width,
                 100,
                 heading_font,
@@ -367,8 +450,8 @@ class InfographicRenderer:
 
             # Panel description
             desc_font = self.font_helper.get_font(16)
-            desc_y = panel_y + self.padding + heading_height + self.padding
-            desc_height = panel_height - heading_height - 3 * self.padding
+            desc_y = panel_y + self.padding + 58 + heading_height + self.padding
+            desc_height = panel_height - 58 - heading_height - 3 * self.padding
             desc_success, _ = self._draw_wrapped_text(
                 draw,
                 panel.get("description", ""),
@@ -401,4 +484,4 @@ class InfographicRenderer:
             logger.warning("Summary text overflow")
 
         self.font_helper.close()
-        return image
+        return image.convert("RGB")

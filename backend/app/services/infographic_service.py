@@ -48,6 +48,31 @@ class InfographicSpecBuilder:
         truncated = text[:max_chars].rsplit(" ", 1)[0]
         return truncated.rstrip(".,;:!")
 
+    @staticmethod
+    def _normalise_section_name(name: str) -> str:
+        """Normalise generated headings so small wording changes still match."""
+        name = name.lower().strip()
+        name = re.sub(r"[*_`]", "", name)
+        name = name.replace("–", "-").replace("—", "-")
+        name = re.sub(r"^(?:a|an|the)\s+", "", name)
+        return re.sub(r"\s+", " ", name)
+
+    @staticmethod
+    def _clean_section_text(text: str, *, first_line_only: bool = False) -> str:
+        """Remove social-post tail content and flatten text for the canvas."""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        cleaned: list[str] = []
+        for line in lines:
+            if line.startswith("#") or line.startswith("❓"):
+                break
+            cleaned.append(line)
+            if first_line_only:
+                break
+
+        value = " ".join(cleaned)
+        value = re.sub(r"^\s*\d+[.)]\s*", "", value)
+        return re.sub(r"\s+", " ", value).strip()
+
     @classmethod
     def build_from_post(
         cls,
@@ -106,9 +131,9 @@ class InfographicSpecBuilder:
             pattern = re.escape(marker) + r"\s+(.+?):\s*(.+?)(?=✅|💡|❓|$)"
             matches = re.findall(pattern, content, re.DOTALL | re.IGNORECASE)
             for section_name, section_text in matches:
-                section_name = section_name.strip()
+                section_name = cls._normalise_section_name(section_name)
                 section_text = section_text.strip()
-                sections[section_name.lower()] = section_text
+                sections[section_name] = section_text
 
         # Build panels based on sections
         panel_sources = [
@@ -123,9 +148,9 @@ class InfographicSpecBuilder:
             source_key, default_heading = panel_sources[i]
             panel_text = sections.get(source_key, f"See {default_heading} in the full post")
 
-            # Extract first sentence or short summary
-            sentences = panel_text.split(".")
-            description = sentences[0].strip() + "." if sentences[0] else panel_text[:180]
+            # Keep useful numbered/abbreviated content. Splitting on every period
+            # previously reduced values such as "1. First step" to just "1.".
+            description = cls._clean_section_text(panel_text)
             description = cls.truncate_text(description, 180)
 
             panel = InfographicPanel(
@@ -146,7 +171,9 @@ class InfographicSpecBuilder:
             paragraphs = content.split("\n\n")
             summary_text = paragraphs[-1] if paragraphs else ""
 
-        summary = cls.truncate_text(summary_text, 180)
+        summary = cls.truncate_text(
+            cls._clean_section_text(summary_text, first_line_only=True), 180
+        )
         if not summary:
             summary = f"Learn more about {title} in the full LinkedIn post"
 
@@ -235,11 +262,11 @@ Color palette: Blue, navy, cyan, teal, white
 Accent color: {spec.accent_color}
 
 STRUCTURE:
-- Top title banner: Leave empty white/light area for large text
-- Three or four distinct content panels arranged horizontally
-- Each panel has an empty heading area and empty description area
-- Clean arrows showing flow between panels
-- Bottom summary banner: Leave empty area for text
+- One cohesive full-bleed illustrated background
+- Three or four visual scenes arranged in equal vertical zones
+- Keep important subjects away from the top 15 percent and bottom 12 percent
+- Clean visual flow from left to right
+- Do not draw cards, banners, frames, labels, headings, or text placeholders
 
 VISUAL ELEMENTS FOR PANELS:
 {panel_descriptions}
@@ -262,8 +289,8 @@ CRITICAL RESTRICTIONS:
 - NO UI screenshots
 - NO photorealism unless explicitly needed
 
-Generate empty, illustrated panels ready for text overlay. The final text will be added
-with typography, not rendered by the model."""
+Generate only the supporting artwork. Deterministic cards, banners, and typography
+will be added later by the application."""
 
         return prompt
 

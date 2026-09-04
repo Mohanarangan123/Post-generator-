@@ -221,10 +221,13 @@ async def retry_infographic_generation(
             status_code=404, detail=f"Generation {generation_id} not found."
         )
 
-    if generation.status != "FAILED":
+    if generation.status not in ("FAILED", "COMPLETED"):
         raise HTTPException(
             status_code=400,
-            detail=f"Can only retry failed generations. Current status: {generation.status}",
+            detail=(
+                "Can only regenerate completed or retry failed generations. "
+                f"Current status: {generation.status}"
+            ),
         )
 
     # Retry generation
